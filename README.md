@@ -1,15 +1,34 @@
- Local AI Shopping Agent (Ollama + Semantic Kernel)An offline, privacy-focused, agentic AI shopping assistant built with .NET 8 and Microsoft's Semantic Kernel. This project utilizes the ReAct (Reasoning + Acting) pattern, allowing a locally hosted Large Language Model (via Ollama) to autonomously choose, configure, and execute native C# tools to handle inventory searches and discount calculations.🚀 Features100% Offline & Private: No external cloud API calls or data leaks. All reasoning happens locally on your hardware.True Agentic Workflow: Uses semantic tool-calling. The model autonomously determines when to search the catalog or apply business logic based on user intent.Native C# Plugin Integration: Bridges the LLM text engine directly to structural C# code, records, and data validation layers.Robust Connection Resilience: Configured with an extended HttpClient execution loop to handle heavy local model load-times smoothly.🛠️ Architecture & Tools BreakdownThe agent has access to a compiled C# execution suite via reflection attributes ([KernelFunction]):Tool NameParametersCore ResponsibilitySearchCatalogquery (string)Scans product titles and category groupings to return real-time matching inventory objects in JSON format.ApplyDiscountcartTotal (decimal), promoCode (string)Executes safe financial subtractions locally to apply valid promotional rules (e.g., SAVE10, WELCOME5).📋 Prerequisites.NET 8 SDK installed on your system.Ollama installed and running locally.A tool-calling capable local model pulled in Ollama (highly recommended: llama3.1 or qwen2.5 variants):Bashollama pull llama3.1
-🔧 Installation & SetupClone the project repository:Bashgit clone <your-repo-url>
-cd LocalShoppingAgent
-Verify dependency references in your .csproj:Your project file needs the following packages configured:XML<ItemGroup>
-    <PackageReference Include="Microsoft.SemanticKernel" Version="1.30.0" />
-    <PackageReference Include="Microsoft.SemanticKernel.Connectors.OpenAI" Version="1.30.0" />
-</ItemGroup>
-Ensure the Experimental API Warning bypass is set:Semantic Kernel's flexible OpenAI-compatible custom endpoint mapper requires suppressing the SKEXP0010 diagnostic flag inside your <PropertyGroup>:XML<NoWarn>$(NoWarn);SKEXP0010</NoWarn>
-🎮 Running the AgentMake sure your local Ollama engine is up and running in the background (ollama serve).Build and launch the .NET execution pipeline:Bashdotnet run
-💬 Sample Prompts to Try:“Do you carry any mechanical keyboards or typing gear?” (Triggers catalog lookup)“Can you check if the Wireless Gaming Mouse is currently in stock?” (Evaluates stock state)“I have a subtotal of $150. Can you check if the promo code SAVE10 works on this?” (Triggers calculator logic)⚙️ CustomizationTo target a different model (e.g., a lightweight 3B model for faster performance on laptops), open Program.cs and modify the model registration profile:C#builder.AddOpenAIChatCompletion(
-    modelId: "qwen2.5:3b", // Switch to your target local model tag
-    apiKey: "ollama-offline",
-    endpoint: new Uri("http://localhost:11434/v1"),
-    httpClient: httpClient
-);
+# 🛍️ Local AI Shopping Agent (Ollama + Semantic Kernel)
+
+An offline, privacy-focused, **agentic AI shopping assistant** built with .NET 8 and Microsoft's **Semantic Kernel**. This project utilizes the **ReAct (Reasoning + Acting)** pattern, allowing a locally hosted Large Language Model (via Ollama) to autonomously choose, configure, and execute native C# tools to handle inventory searches and discount calculations.
+
+---
+
+## 🚀 Features
+
+* **100% Offline & Private:** No external cloud API calls or data leaks. All reasoning happens locally on your hardware.
+* **True Agentic Workflow:** Uses semantic tool-calling. The model autonomously determines *when* to search the catalog or apply business logic based on user intent.
+* **Native C# Plugin Integration:** Bridges the LLM text engine directly to structural C# code, records, and data validation layers.
+* **Robust Connection Resilience:** Configured with an extended HttpClient execution loop to handle heavy local model load-times smoothly.
+
+---
+
+## 🛠️ Architecture & Tools Breakdown
+
+The agent has access to a compiled C# execution suite via reflection attributes (`[KernelFunction]`):
+
+| Tool Name | Parameters | Core Responsibility |
+| :--- | :--- | :--- |
+| `SearchCatalog` | `query` *(string)* | Scans product titles and category groupings to return real-time matching inventory objects in JSON format. |
+| `ApplyDiscount` | `cartTotal` *(decimal)*, `promoCode` *(string)* | Executes safe financial subtractions locally to apply valid promotional rules (e.g., `SAVE10`, `WELCOME5`). |
+
+---
+
+## 📋 Prerequisites
+
+1. **.NET 8 SDK** installed on your system.
+2. **Ollama** installed and running locally.
+3. A tool-calling capable local model pulled in Ollama (highly recommended: `llama3.1` or `qwen2.5` variants):
+
+```bash
+ollama pull llama3.1
