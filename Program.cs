@@ -1,87 +1,132 @@
 ﻿using System;
+using System.Text.Json;
 using System.Threading.Tasks;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using Microsoft.SemanticKernel;
 using Microsoft.SemanticKernel.ChatCompletion;
-using Microsoft.SemanticKernel.Connectors.OpenAI;
+using Microsoft.SemanticKernel.Connectors.Google;
 
 namespace LocalShoppingAgent
 {
-    class Program
+    public class Program
     {
-        static async Task Main(string[] args)
+        public static void Main(string[] args)
         {
-         // 1. Create a custom HttpClient with an extended or infinite timeout
-var handler = new HttpClientHandler();
-var httpClient = new HttpClient(handler)
-{
-    Timeout = System.Threading.Timeout.InfiniteTimeSpan // Prevents the 100-second cutoff
-};
+            var builder = WebApplication.CreateBuilder(args);
 
-// 2. Pass the httpClient into your Ollama configuration setup
-var builder = Kernel.CreateBuilder();
-
-builder.AddOpenAIChatCompletion(
-    modelId: "llama3.1",                            // Or "qwen2.5:3b"
-    apiKey: "ollama-offline",
-    endpoint: new Uri("http://localhost:11434/v1"),
-    httpClient: httpClient                          // <-- Hook up the custom client here
-);
-
-            // 2. Register our custom retail tool plugin
-            builder.Plugins.AddFromType<ProductPlugin>("ShoppingTools");
-
-            Kernel kernel = builder.Build();
-
-            // 3. Enable automatic tool call invocation behavior for step-by-step loops
-            OpenAIPromptExecutionSettings settings = new()
+            // 1. Add CORS so frontends can call this API
+            builder.Services.AddCors(options =>
             {
-                ToolCallBehavior = ToolCallBehavior.AutoInvokeKernelFunctions
-            };
+                options.AddDefaultPolicy(policy =>
+                {
+                    policy.AllowAnyOrigin()
+                          .AllowAnyMethod()
+                          .AllowAnyHeader();
+                });
+            });
 
-            var chatHistory = new ChatHistory();
-            var chatService = kernel.GetRequiredService<IChatCompletionService>();
+            // 2. Fetch the Gemini API Key from your Environment Variables
+            string geminiApiKey = Environment.GetEnvironmentVariable("GEMINI_API_KEY") 
+                ?? throw new InvalidOperationException("CRITICAL: 'GEMINI_API_KEY' environment variable is missing!");
 
-            // Give the local model its operational behavior guidelines
-            chatHistory.AddSystemMessage(
-                "You are an offline AI Shopping Assistant running locally. Use your provided tools to look up product data " +
-                "and calculate promotional code updates. Always report details clearly in structured markdown layout.");
-
-            Console.ForegroundColor = ConsoleColor.Cyan;
-            Console.WriteLine("🛍️ Offline Ollama Shopping Agent Activated! (Ctrl+C to exit)");
-            Console.WriteLine("Ask something like: 'Do you have any mechanical keyboards?' or 'Is the gaming mouse in stock?'");
-            Console.ResetColor();
-
-            // 4. Main loop processing conversation inputs
-            while (true)
+            // 3. Register the Semantic Kernel in the Dependency Injection (DI) Container
+            builder.Services.AddTransient<Kernel>(sp =>
             {
-                Console.Write("\n👤 You: ");
-                string? userInput = Console.ReadLine();
-                if (string.IsNullOrWhiteSpace(userInput)) break;
+                var kernelBuilder = Kernel.CreateBuilder();
 
-                chatHistory.AddUserMessage(userInput);
+                // Swap Ollama with the Gemini API (using the fast and free gemini-1.5-flash model)
+                kernelBuilder.AddGoogleAIGeminiChatCompletion(
+                    modelId: "gemini-1.5-flash",
+                    apiKey: geminiApiKey
+                );
+
+                // Register your ProductPlugin class as a tool set
+                kernelBuilder.Plugins.AddFromType<ProductPlugin>("ShoppingTools");
+
+                return kernelBuilder.Build();
+            });
+
+            var app = builder.Build();
+
+            // Enable CORS & routing
+            app.UseCors();
+
+            // 4. Create a stateless POST endpoint to receive chat messages
+            app.MapPost("/api/chat", async (ChatRequest request, Kernel kernel) =>
+            {
+                if (string.IsNullOrWhiteSpace(request.Message))
+                {
+                    return Results.BadRequest(new { error = "Message cannot be empty." });
+                }
 
                 try
                 {
-                    Console.ForegroundColor = ConsoleColor.DarkGray;
-                    Console.WriteLine("⏳ Agent is parsing request and executing local tools...");
-                    Console.ResetColor();
+                    var chatService = kernel.GetRequiredService<IChatCompletionService>();
 
-                    // Model evaluates text, calls local functions if needed, and returns a processed outcome
-                    var response = await chatService.GetChatMessageContentAsync(chatHistory, settings, kernel);
+                    // Prepare the history object
+                    var chatHistory = new ChatHistory();
                     
-                    Console.ForegroundColor = ConsoleColor.Green;
-                    Console.WriteLine($"\n🤖 Agent:\n{response.Content}");
-                    Console.ResetColor();
+                    // Inject system prompt behavior
+                    chatHistory.AddSystemMessage(
+                        "You are a helpful cloud-hosted AI Shopping Assistant. Use your provided tools to look up product data " +
+                        "and calculate promotional code updates. Always report details clearly in structured markdown layout.");
 
-                    chatHistory.Add(response);
+                    // (Optional) Rebuild history from client if sent, or just process the current user message
+                    if (request.History != null)
+                    {
+                        foreach (var hist in request.History)
+                        {
+                            if (hist.IsUser) chatHistory.AddUserMessage(hist.Text);
+                            else chatHistory.AddAssistantMessage(hist.Text);
+                        }
+                    }
+
+                    // Add the latest user message
+                    chatHistory.AddUserMessage(request.Message);
+
+                    // Configure tool call settings for Gemini
+                    GeminiPromptExecutionSettings settings = new()
+                    {
+                        ToolCallBehavior = GeminiToolCallBehavior.AutoInvokeKernelFunctions
+                    };
+
+                    // Let Gemini run, automatically call any needed ProductPlugin tools, and return the answer
+                    var response = await chatService.GetChatMessageContentAsync(chatHistory, settings, kernel);
+
+                    return Results.Ok(new ChatResponse 
+                    { 
+                        Reply = response.Content ?? "I couldn't process that request." 
+                    });
                 }
                 catch (Exception ex)
                 {
-                    Console.ForegroundColor = ConsoleColor.Red;
-                    Console.WriteLine($"⚠️ Execution error: {ex.Message}");
-                    Console.ResetColor();
+                    return Results.Json(new { error = $"Execution error: {ex.Message}" }, statusCode: 500);
                 }
-            }
+            });
+
+            app.Run();
         }
+    }
+
+    // --- Supporting Data Transfer Objects (DTOs) ---
+
+    public class ChatRequest
+    {
+        public string Message { get; set; } = string.Empty;
+        public HistoryItem[]? History { get; set; }
+    }
+
+    public class HistoryItem
+    {
+        public bool IsUser { get; set; }
+        public string Text { get; set; } = string.Empty;
+    }
+
+    public class ChatResponse
+    {
+        public string Reply { get; set; } = string.Empty;
     }
 }
