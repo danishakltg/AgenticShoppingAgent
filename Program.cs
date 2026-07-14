@@ -107,6 +107,7 @@ namespace LocalShoppingAgent
                 }
             });
 
+            app.MapGet("/", () => "Healthy!");
             app.Run();
         }
     }
