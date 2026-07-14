@@ -12,8 +12,8 @@ namespace LocalShoppingAgent
 
     public class ProductPlugin
     {
-        // Our local offline catalog data
-        private readonly List<Product> _catalog = new()
+        // Removed 'readonly' so we can add new products dynamically to the list.
+        private List<Product> _catalog = new()
         {
             new Product(101, "RGB Mechanical Keyboard", "Electronics", 79.99m, 12),
             new Product(102, "Wireless Gaming Mouse", "Electronics", 49.99m, 0), // Out of stock
@@ -21,6 +21,35 @@ namespace LocalShoppingAgent
             new Product(104, "Noise Cancelling Headphones", "Audio", 129.99m, 20),
             new Product(105, "Leather Waterproof Backpack", "Apparel", 65.00m, 8)
         };
+
+        [KernelFunction, Description("Adds a new product to the catalog. The system automatically assigns a new unique product ID.")]
+        public string AddProduct(
+            [Description("The name of the product to add (e.g., 'Ergonomic Office Chair').")] string name,
+            [Description("The category the product belongs to (e.g., 'Furniture', 'Electronics').")] string category,
+            [Description("The unit price of the product.")] decimal price,
+            [Description("The initial stock quantity of the product.")] int stock)
+        {
+            // Input validation
+            if (string.IsNullOrWhiteSpace(name))
+                return "Error: Product name cannot be empty.";
+                
+            if (string.IsNullOrWhiteSpace(category))
+                return "Error: Category cannot be empty.";
+
+            if (price < 0)
+                return "Error: Price cannot be negative.";
+
+            if (stock < 0)
+                return "Error: Stock cannot be negative.";
+
+            // Generate a new sequential ID
+            int nextId = _catalog.Any() ? _catalog.Max(p => p.Id) + 1 : 101;
+
+            var newProduct = new Product(nextId, name, category, price, stock);
+            _catalog.Add(newProduct);
+
+            return $"Success! Added new product to catalog:\n{JsonSerializer.Serialize(newProduct, new JsonSerializerOptions { WriteIndented = true })}";
+        }
 
         [KernelFunction, Description("Searches the shopping catalog for products matching a generic keyword or category description.")]
         public string SearchCatalog(
